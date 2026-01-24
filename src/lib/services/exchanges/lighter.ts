@@ -14,8 +14,11 @@ const getFundingRates = (): Effect.Effect<any[], Error> =>
 export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
     pipe(
         getFundingRates(),
-        Effect.map((rates) =>
-            rates.map((rate) => ({
+        Effect.map((response: any) => {
+            // Filter to only include Lighter exchange rates from the aggregator API
+            const lighterRates = response.funding_rates?.filter((rate: any) => rate.exchange === "lighter") || [];
+                        
+            return lighterRates.map((rate: any) => ({
                 symbol: rate.symbol,
                 baseAsset: rate.symbol.split("-")[0] || rate.symbol,
                 estimatedFundingRate: rate.rate.toString(),
@@ -23,8 +26,8 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
                 lastSettlementTime: Date.now() - 3600000,
                 nextFundingTime: Date.now() + 3600000,
                 fundingInterval: 3600000,
-            }))
-        ),
+            }));
+        }),
         Effect.catchAll((error) => {
             console.warn('Lighter API error, returning empty array:', error);
             return Effect.succeed([]);

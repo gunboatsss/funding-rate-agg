@@ -5,7 +5,7 @@ import { getAllFundingRates } from "../src/lib/services/exchanges/synthetix";
 describe("Synthetix Funding Rates", () => {
     it("should fetch all funding rates", async () => {
         const result = await Effect.runPromise(getAllFundingRates());
-
+        console.log(result);
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
 
