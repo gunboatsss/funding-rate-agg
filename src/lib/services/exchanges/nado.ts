@@ -95,7 +95,7 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
                 
                 return {
                     symbol: symbolName,
-                    baseAsset: symbolName.split("-")[0] || symbolName,
+                    baseAsset: (symbolName.split("-")[0] || symbolName).replace(/^k/, ''),
                     estimatedFundingRate: "0", // Nado provides cumulative funding, not rate
                     lastSettlementRate: cumulativeFunding > 0n ? (cumulativeFunding / 1000000000000000000n).toString() : "0",
                     lastSettlementTime: Date.now() - 3600000,

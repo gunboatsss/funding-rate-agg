@@ -35,7 +35,7 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
             // Use summary data only for speed - skip individual funding calls
             return markets.map((market) => ({
                 symbol: market.symbol,
-                baseAsset: market.symbol.split("-")[0] || market.symbol,
+                baseAsset: (market.symbol.split("-")[0] || market.symbol).replace(/^k/, ''),
                 estimatedFundingRate: market.funding_rate || "0",
                 lastSettlementRate: market.funding_rate || "0",
                 lastSettlementTime: Date.now() - 3600000,

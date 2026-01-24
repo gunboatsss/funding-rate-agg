@@ -16,18 +16,27 @@ const getMarkets = (): Effect.Effect<SynthetixMarket[], Error> =>
         Effect.catchAll(() => Effect.succeed([] as SynthetixMarket[]))
     );
 
-const getFundingRate = (symbol: string): Effect.Effect<FundingRate, Error> =>
+const getFundingRate = (market: SynthetixMarket): Effect.Effect<FundingRate, Error> =>
     pipe(
         safeFetch(SYNTHETIX_API, {
             method: "POST",
             body: JSON.stringify({
-                params: { action: "getFundingRate", symbol },
+                params: { action: "getFundingRate", symbol: market.symbol },
             }),
         }),
         Effect.map((data: any) => data.response),
+        Effect.map((response: any) => ({
+            symbol: market.symbol,
+            baseAsset: market.baseAsset.replace(/^1000/, ''),
+            estimatedFundingRate: response.estimatedFundingRate,
+            lastSettlementRate: response.lastSettlementRate,
+            lastSettlementTime: response.lastSettlementTime,
+            nextFundingTime: response.nextFundingTime,
+            fundingInterval: response.fundingInterval,
+        } as FundingRate)),
         Effect.catchAll(() => Effect.succeed({
-            symbol,
-            baseAsset: symbol.split("-")[0] || symbol,
+            symbol: market.symbol,
+            baseAsset: market.baseAsset.replace(/^1000/, ''),
             estimatedFundingRate: "0",
             lastSettlementRate: "0",
             lastSettlementTime: Date.now() - 3600000,
@@ -42,7 +51,7 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
         Effect.flatMap((markets) =>
             Effect.all(
                 markets.slice(0, 10).map((market) => // Limit to prevent overload
-                    getFundingRate(market.symbol)
+                    getFundingRate(market)
                 ),
                 { concurrency: 3 } // Reduced concurrency to be more conservative
             )
