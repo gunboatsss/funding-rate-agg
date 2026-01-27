@@ -17,7 +17,6 @@ export interface ExchangeData {
 
 export interface AggregatedData {
   byExchange: ExchangeData[];
-  bySymbol: Record<string, ExchangeData[]>;
   totalRates: number;
   lastUpdate: number;
 }
@@ -123,46 +122,18 @@ export const getAllExchangeData = (): Effect.Effect<ExchangeData[], never, never
     )
   ], { concurrency: 6 });
 
-// Aggregate data by baseAsset for better grouping
-export const aggregateByBaseAsset = (exchangeData: ExchangeData[]): Record<string, ExchangeData[]> => {
-  const baseAssetMap: Record<string, ExchangeData[]> = {};
-  
-  exchangeData.forEach(exchange => {
-    if (exchange.status === 'success') {
-      exchange.rates.forEach(rate => {
-        const baseAsset = rate.baseAsset;
-        if (!baseAssetMap[baseAsset]) {
-          baseAssetMap[baseAsset] = [];
-        }
-        // Check if this exchange is already added for this baseAsset
-        const existingExchange = baseAssetMap[baseAsset].find(ex => ex.exchange === exchange.exchange);
-        if (existingExchange) {
-          existingExchange.rates.push(rate);
-        } else {
-          baseAssetMap[baseAsset].push({
-            ...exchange,
-            rates: [rate]
-          });
-        }
-      });
-    }
-  });
-  
-  return baseAssetMap;
-};
 
-// Get aggregated data with both views
+
+// Get aggregated data
 export const getAggregatedData = (): Effect.Effect<AggregatedData, never, never> =>
   pipe(
     getAllExchangeData(),
     Effect.map(exchangeData => {
-      const bySymbol = aggregateByBaseAsset(exchangeData);
       const totalRates = exchangeData.reduce((sum, ex) => sum + ex.rates.length, 0);
       const lastUpdate = Math.max(...exchangeData.map(ex => ex.lastUpdate));
       
       return {
         byExchange: exchangeData,
-        bySymbol,
         totalRates,
         lastUpdate
       };

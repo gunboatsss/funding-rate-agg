@@ -3,7 +3,8 @@
 	import RatesTable from '$lib/components/RatesTable.svelte';
 	import ExchangeStatus from '$lib/components/ExchangeStatus.svelte';
 	import SymbolGroups from '$lib/components/SymbolGroups.svelte';
-	import type { DashboardData } from '$lib/types/frontend';
+	import type { DashboardData, ExchangeData } from '$lib/types/frontend';
+	import type { FundingRate } from '$lib/services/types';
 
 	let dashboardData: DashboardData | null = $state(null);
 	let exchangeStatuses: any[] = $state([]);
@@ -30,13 +31,24 @@
 			exchangeStatuses = statusData.status;
 
 			// Transform data for frontend
+			const uniqueSymbols = ratesData.byExchange.flatMap((ex: ExchangeData) => 
+				ex.status === 'success' && ex.rates ? ex.rates.map((rate: FundingRate) => rate.baseAsset) : []
+			).filter((baseAsset: string, index: number, arr: string[]) => arr.indexOf(baseAsset) === index);
+			
 			const transformed: DashboardData = {
 				byExchange: ratesData.byExchange, // Use rates API data for the table
-				bySymbol: transformSymbolGroups(ratesData.bySymbol, statusData.status),
+				bySymbol: [], // SymbolGroups will generate this internally
 				totalRates: ratesData.totalRates,
 				lastUpdate: ratesData.lastUpdate,
-				uniqueSymbols: Object.keys(ratesData.bySymbol).sort()
+				uniqueSymbols
 			};
+			
+			// Debug final dashboard data
+			console.log('Debug: dashboardData:', {
+				byExchangeCount: transformed.byExchange.length,
+				uniqueSymbolsCount: transformed.uniqueSymbols.length
+			});
+			
 			dashboardData = transformed;
 			lastUpdate = ratesData.lastUpdate;
 			error = null;
@@ -48,69 +60,7 @@
 		}
 	};
 
-	const transformSymbolGroups = (bySymbol: Record<string, any[]>, byExchange: any[]) => {
-		return Object.entries(bySymbol).map(([baseAsset, exchangeData]) => {
-			const validExchanges: any[] = [];
-			
-			exchangeData.forEach(ex => {
-				if (ex.status === 'success' && ex.rates && ex.rates.length > 0) {
-					ex.rates.forEach((rate: any) => {
-						const rateNumeric = parseFloat(rate.estimatedFundingRate) || 0;
-						validExchanges.push({
-							...rate,
-							exchange: ex.exchange,
-							rateNumeric,
-							rateFormatted: formatRate(rate.estimatedFundingRate),
-							isPositive: rateNumeric > 0,
-							timeUntilNextFunding: rate.nextFundingTime - Date.now(),
-							lastUpdateFormatted: new Date(ex.lastUpdate || Date.now()).toLocaleTimeString()
-						});
-					});
-				}
-			});
-			
-			return {
-				symbol: baseAsset, // Use baseAsset as the symbol since API groups by baseAsset
-				baseAsset,
-				exchanges: validExchanges,
-				comparison: calculateComparison(baseAsset, validExchanges)
-			};
-		});
-	};
-
-	const formatRate = (rate: string): string => {
-		const num = parseFloat(rate) || 0;
-		return `${num >= 0 ? '+' : ''}${num.toFixed(4)}%`;
-	};
-
-	const calculateComparison = (baseAsset: string, exchanges: Array<any>) => {
-		try {
-			if (exchanges.length === 0) return null;
-
-			const validRates = exchanges
-				.map(ex => ({
-					exchange: ex.exchange,
-					rate: ex.rateNumeric || 0,
-					lastUpdate: Date.now()
-				}))
-				.filter(item => !isNaN(item.rate));
-
-			if (validRates.length === 0) return null;
-
-			validRates.sort((a, b) => a.rate - b.rate);
-
-			return {
-				lowest: validRates[0],
-				highest: validRates[validRates.length - 1],
-				average: validRates.reduce((sum, item) => sum + item.rate, 0) / validRates.length,
-				spread: validRates[validRates.length - 1].rate - validRates[0].rate,
-				count: validRates.length
-			};
-		} catch (error) {
-			console.warn('Error in calculateComparison:', error);
-			return null;
-		}
-	};
+	
 
 	onMount(() => {
 		fetchData();
@@ -234,7 +184,7 @@
 			{#if selectedView === 'table'}
 				<RatesTable data={dashboardData} />
 			{:else}
-				<SymbolGroups data={dashboardData.bySymbol} />
+				<SymbolGroups data={dashboardData} />
 			{/if}
 		{/if}
 	</main>

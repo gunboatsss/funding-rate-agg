@@ -16,7 +16,6 @@ export async function GET() {
       { 
         error: 'Failed to fetch funding rates',
         byExchange: [],
-        bySymbol: {},
         totalRates: 0,
         lastUpdate: Date.now()
       },

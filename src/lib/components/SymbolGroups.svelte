@@ -1,57 +1,60 @@
 <script lang="ts">
-	import type { SymbolGroup } from '$lib/types/frontend';
+	import type { DashboardData, SymbolGroup, ExchangeData, RateDisplay } from '$lib/types/frontend';
+	import type { FundingRate } from '$lib/services/types';
+	import { calculateAnnualRate, formatRateFromString, getRateColor, formatComparisonRate } from '$lib/utils/rate-calculations';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
-		data: SymbolGroup[];
+		data: DashboardData;
 	}
 
 	let { data }: Props = $props();
+	
+	let expandedSymbols = new SvelteSet<string>();
 
-	let expandedSymbols = $state<Set<string>>(new Set());
 	let sortBy = $state<'symbol' | 'spread' | 'avgRate'>('symbol');
 	let sortOrder = $state<'asc' | 'desc'>('asc');
+	let showAnnualRates = $state<boolean>(false);
 
-	const toggleSymbol = (symbol: string) => {
+	// Aggregate bySymbol data from ExchangeData - moved from parent component
+	let symbolGroups: SymbolGroup[] = $derived.by(() => {
+		if (!data?.byExchange) return [];
+		
+		return aggregateBySymbol(data.byExchange);
+	});
+
+const toggleSymbol = (symbol: string) => {
 		if (expandedSymbols.has(symbol)) {
 			expandedSymbols.delete(symbol);
 		} else {
 			expandedSymbols.add(symbol);
 		}
-		expandedSymbols = new Set(expandedSymbols); // Trigger reactivity
 	};
 
-	const sortedData = $derived(() => {
-		const sorted = [...data];
+	const sortedData: SymbolGroup[] = $derived.by(() => {
+		const sorted = [...symbolGroups];
 		
 		sorted.sort((a, b) => {
-			let aVal: string | number, bVal: string | number;
-			
 			switch (sortBy) {
-				case 'symbol':
-					aVal = a.symbol;
-					bVal = b.symbol;
-					break;
-				case 'spread':
-					aVal = a.comparison?.spread || 0;
-					bVal = b.comparison?.spread || 0;
-					break;
-				case 'avgRate':
-					aVal = a.comparison?.average || 0;
-					bVal = b.comparison?.average || 0;
-					break;
-			}
-
-			if (typeof aVal === 'string') {
-				return sortOrder === 'asc' 
-					? aVal.localeCompare(bVal)
-					: bVal.localeCompare(aVal);
-			} else {
-				return sortOrder === 'asc' 
-					? aVal - bVal
-					: bVal - aVal;
+				case 'symbol': {
+					const symbolComparison = a.symbol.localeCompare(b.symbol);
+					return sortOrder === 'asc' ? symbolComparison : -symbolComparison;
+				}
+				case 'spread': {
+					const aSpread = a.comparison?.spread || 0;
+					const bSpread = b.comparison?.spread || 0;
+					return sortOrder === 'asc' ? aSpread - bSpread : bSpread - aSpread;
+				}
+				case 'avgRate': {
+					const aAvg = a.comparison?.average || 0;
+					const bAvg = b.comparison?.average || 0;
+					return sortOrder === 'asc' ? aAvg - bAvg : bAvg - aAvg;
+				}
+				default:
+					return 0;
 			}
 		});
-
+		console.log(sorted);
 		return sorted;
 	});
 
@@ -64,11 +67,7 @@
 		}
 	};
 
-	const getRateColor = (rate: number) => {
-		if (rate > 0.01) return 'text-green-400';
-		if (rate < -0.01) return 'text-red-400';
-		return 'text-gray-300';
-	};
+	
 
 	const getSpreadColor = (spread: number) => {
 		if (spread > 0.05) return 'text-orange-400';
@@ -80,13 +79,123 @@
 		if (ms < 60000) return `${Math.floor(ms / 1000)}s`;
 		return `${Math.floor(ms / 60000)}m`;
 	};
+
+	// Aggregation functions moved from parent component
+	const aggregateBySymbol = (byExchange: ExchangeData[]): SymbolGroup[] => {
+		const baseAssetMap: Record<string, Array<{exchange: string, rates: FundingRate[], lastUpdate: number}>> = {};
+		
+		byExchange.forEach(exchange => {
+			if (exchange.status === 'success') {
+				exchange.rates.forEach((rate: FundingRate) => {
+					const baseAsset = rate.baseAsset;
+					if (!baseAssetMap[baseAsset]) {
+						baseAssetMap[baseAsset] = [];
+					}
+					// Check if this exchange is already added for this baseAsset
+					const existingExchange = baseAssetMap[baseAsset].find((ex) => ex.exchange === exchange.exchange);
+					if (existingExchange) {
+						existingExchange.rates.push(rate);
+					} else {
+						baseAssetMap[baseAsset].push({
+							exchange: exchange.exchange,
+							rates: [rate],
+							lastUpdate: exchange.lastUpdate
+						});
+					}
+				});
+			}
+		});
+		
+		return Object.entries(baseAssetMap).map(([baseAsset, exchangeData]) => {
+			const validExchanges: RateDisplay[] = [];
+			
+			exchangeData.forEach((ex) => {
+				if (ex.rates && ex.rates.length > 0) {
+					ex.rates.forEach((rate: FundingRate) => {
+						const rateNumeric = parseFloat(rate.estimatedFundingRate) || 0;
+						const adjustedRateNumeric = showAnnualRates ? calculateAnnualRate(rateNumeric) : rateNumeric;
+						validExchanges.push({
+							...rate,
+							exchange: ex.exchange,
+							rateNumeric: adjustedRateNumeric,
+							rateFormatted: formatRateFromString(rate.estimatedFundingRate, showAnnualRates),
+							isPositive: rateNumeric > 0,
+							timeUntilNextFunding: rate.nextFundingTime - Date.now(),
+							lastUpdateFormatted: new Date(ex.lastUpdate || Date.now()).toLocaleTimeString()
+						});
+					});
+				}
+			});
+			
+			return {
+				symbol: baseAsset, // Use baseAsset as the symbol since we group by baseAsset
+				baseAsset,
+				exchanges: validExchanges,
+				comparison: calculateComparison(baseAsset, validExchanges)
+			};
+		});
+	};
+
+	
+
+	const calculateComparison = (baseAsset: string, exchanges: RateDisplay[]) => {
+		try {
+			if (exchanges.length === 0) return null;
+
+			const validRates = exchanges
+				.map(ex => ({
+					exchange: ex.exchange,
+					rate: ex.rateNumeric || 0,
+					lastUpdate: Date.now()
+				}))
+				.filter(item => !isNaN(item.rate));
+
+			if (validRates.length === 0) return null;
+
+			validRates.sort((a, b) => a.rate - b.rate);
+
+			return {
+				lowest: validRates[0],
+				highest: validRates[validRates.length - 1],
+				average: validRates.reduce((sum, item) => sum + item.rate, 0) / validRates.length,
+				spread: validRates[validRates.length - 1].rate - validRates[0].rate,
+				count: validRates.length
+			};
+		} catch (error) {
+			console.warn('Error in calculateComparison:', error);
+			return null;
+		}
+	};
+
+	
 </script>
 
 <div class="space-y-4">
 	<!-- Sort Controls -->
 	<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
 		<div class="flex items-center justify-between">
-			<h3 class="text-sm font-medium text-gray-400">Symbol Groups ({data.length})</h3>
+			<div class="flex items-center space-x-4">
+				<h3 class="text-sm font-medium text-gray-400">Symbol Groups ({symbolGroups.length})</h3>
+				<div class="flex items-center space-x-2">
+					<label for="annual-rates-toggle-symbols" class="text-sm text-gray-400">Show Annual Rates</label>
+					<button
+						id="annual-rates-toggle-symbols"
+						class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+						class:bg-cyan-600={showAnnualRates}
+						class:bg-gray-600={!showAnnualRates}
+						onclick={() => showAnnualRates = !showAnnualRates}
+						title="Toggle between daily and annual rates (rate × 365)"
+						role="switch"
+						aria-checked={showAnnualRates}
+					>
+						<span
+							class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+							class:translate-x-6={showAnnualRates}
+							class:translate-x-1={!showAnnualRates}
+						></span>
+					</button>
+				</div>
+			</div>
 			<div class="flex space-x-2">
 				<button
 					class="px-3 py-1 text-xs rounded-md transition-colors"
@@ -161,8 +270,8 @@
 							</div>
 							<div class="flex items-center space-x-1">
 								<span class="text-gray-400">Avg:</span>
-								<span class="font-mono {getRateColor(symbolGroup.comparison.average)}">
-									{(symbolGroup.comparison.average >= 0 ? '+' : '')}{symbolGroup.comparison.average.toFixed(4)}%
+								<span class="font-mono {getRateColor(symbolGroup.comparison.average, showAnnualRates)}">
+									{formatComparisonRate(symbolGroup.comparison.average, showAnnualRates)}
 								</span>
 							</div>
 							<div class="flex items-center space-x-1">
@@ -179,14 +288,14 @@
 							<span class="text-gray-500">Low:</span>
 							<span class="text-green-400">{symbolGroup.comparison.lowest.exchange}</span>
 							<span class="font-mono text-green-400">
-								{symbolGroup.comparison.lowest.rate >= 0 ? '+' : ''}{symbolGroup.comparison.lowest.rate.toFixed(3)}%
+								{formatComparisonRate(symbolGroup.comparison.lowest.rate, showAnnualRates)}
 							</span>
 						</div>
 						<div class="flex items-center space-x-1">
 							<span class="text-gray-500">High:</span>
 							<span class="text-red-400">{symbolGroup.comparison.highest.exchange}</span>
 							<span class="font-mono text-red-400">
-								{symbolGroup.comparison.highest.rate >= 0 ? '+' : ''}{symbolGroup.comparison.highest.rate.toFixed(3)}%
+								{formatComparisonRate(symbolGroup.comparison.highest.rate, showAnnualRates)}
 							</span>
 						</div>
 					</div>
@@ -217,9 +326,9 @@
 											</div>
 										</td>
 										<td class="px-4 py-2">
-											<span class="text-sm font-mono {getRateColor(exchange.rateNumeric)}">
-												{exchange.rateFormatted}
-											</span>
+<span class="text-sm font-mono {getRateColor(exchange.rateNumeric, showAnnualRates)}">
+											{exchange.rateFormatted}
+										</span>
 										</td>
 										<td class="px-4 py-2">
 											<span class="text-sm text-gray-300">{exchange.lastSettlementRate}</span>
@@ -245,7 +354,7 @@
 		</div>
 	{/each}
 
-	{#if data.length === 0}
+	{#if symbolGroups.length === 0}
 		<div class="text-center py-8">
 			<p class="text-gray-400">No symbol data available.</p>
 		</div>

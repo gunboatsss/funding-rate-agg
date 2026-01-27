@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { DashboardData } from '$lib/types/frontend';
+	import { calculateAnnualRate, formatRate, getRateColor, getRateBg } from '$lib/utils/rate-calculations';
 
 	interface Props {
 		data: DashboardData;
@@ -11,6 +12,7 @@
 	let sortDirection = $state<'asc' | 'desc'>('asc');
 	let filterExchange = $state<string>('all');
 	let filterBaseAsset = $state<string>('all');
+	let showAnnualRates = $state<boolean>(false);
 
 	// Get all unique base assets - using $derived for proper reactivity
 	let uniqueBaseAssets = $derived(() => {
@@ -53,12 +55,13 @@
 				exchange.rates.forEach(rate => {
 					totalProcessed++;
 					const rateNumeric = parseFloat(rate.estimatedFundingRate) || 0;
+					const adjustedRateNumeric = showAnnualRates ? calculateAnnualRate(rateNumeric) : rateNumeric;
 					rates.push({
 						exchange: exchange.exchange,
 						symbol: rate.symbol,
 						baseAsset: rate.baseAsset,
-						rateNumeric,
-						rateFormatted: rateNumeric >= 0 ? `+${rateNumeric.toFixed(4)}%` : `${rateNumeric.toFixed(4)}%`,
+						rateNumeric: adjustedRateNumeric,
+						rateFormatted: formatRate(rateNumeric, showAnnualRates),
 						isPositive: rateNumeric > 0,
 						timeUntilNextFunding: rate.nextFundingTime - Date.now(),
 						lastUpdateFormatted: new Date(exchange.lastUpdate).toLocaleTimeString(),
@@ -87,35 +90,25 @@
 
 		// Apply sorting
 		filtered.sort((a, b) => {
-			let aVal: string | number, bVal: string | number;
-			
 			switch (sortKey) {
-				case 'exchange':
-					aVal = a.exchange;
-					bVal = b.exchange;
-					break;
-				case 'symbol':
-					aVal = a.symbol;
-					bVal = b.symbol;
-					break;
+				case 'exchange': {
+					const exchangeComparison = a.exchange.localeCompare(b.exchange);
+					return sortDirection === 'asc' ? exchangeComparison : -exchangeComparison;
+				}
+				case 'symbol': {
+					const symbolComparison = a.symbol.localeCompare(b.symbol);
+					return sortDirection === 'asc' ? symbolComparison : -symbolComparison;
+				}
 				case 'rate':
-					aVal = a.rateNumeric;
-					bVal = b.rateNumeric;
-					break;
+					return sortDirection === 'asc' 
+						? a.rateNumeric - b.rateNumeric 
+						: b.rateNumeric - a.rateNumeric;
 				case 'lastUpdate':
-					aVal = a.nextFundingTime;
-					bVal = b.nextFundingTime;
-					break;
-			}
-
-			if (typeof aVal === 'string') {
-				return sortDirection === 'asc' 
-					? aVal.localeCompare(bVal)
-					: bVal.localeCompare(aVal);
-			} else {
-				return sortDirection === 'asc' 
-					? aVal - bVal
-					: bVal - aVal;
+					return sortDirection === 'asc' 
+						? a.nextFundingTime - b.nextFundingTime 
+						: b.nextFundingTime - a.nextFundingTime;
+				default:
+					return 0;
 			}
 		});
 
@@ -131,17 +124,7 @@
 		}
 	};
 
-	const getRateColor = (rate: number) => {
-		if (rate > 0.01) return 'text-green-400';
-		if (rate < -0.01) return 'text-red-400';
-		return 'text-gray-300';
-	};
-
-	const getRateBg = (rate: number) => {
-		if (rate > 0.01) return 'bg-green-900/20';
-		if (rate < -0.01) return 'bg-red-900/20';
-		return 'bg-gray-800/50';
-	};
+	
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
@@ -176,8 +159,30 @@
 				</select>
 			</div>
 
-			<div class="text-sm text-gray-400">
-				Showing {filteredRates().length} of {allRates().length} rates
+			<div class="flex items-center space-x-3">
+				<div class="flex items-center space-x-2">
+					<label for="annual-rates-toggle" class="text-sm text-gray-400">Show Annual Rates</label>
+					<button
+						id="annual-rates-toggle"
+						class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+						class:bg-cyan-600={showAnnualRates}
+						class:bg-gray-600={!showAnnualRates}
+						onclick={() => showAnnualRates = !showAnnualRates}
+						title="Toggle between daily and annual rates (rate × 365)"
+						role="switch"
+						aria-checked={showAnnualRates}
+					>
+						<span
+							class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+							class:translate-x-6={showAnnualRates}
+							class:translate-x-1={!showAnnualRates}
+						></span>
+					</button>
+				</div>
+				
+				<div class="text-sm text-gray-400">
+					Showing {filteredRates().length} of {allRates().length} rates
+				</div>
 			</div>
 		</div>
 	</div>
@@ -214,7 +219,7 @@
 							class="flex items-center space-x-1 text-xs font-medium text-gray-300 hover:text-cyan-400 transition-colors"
 							onclick={() => handleSort('rate')}
 						>
-							<span>Funding Rate</span>
+							<span>Funding Rate{showAnnualRates ? ' (Annual)' : ''}</span>
 							{#if sortKey === 'rate'}
 								<span class="text-cyan-400">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 							{/if}
@@ -249,10 +254,10 @@
 						</td>
 						<td class="px-4 py-3">
 							<div class="flex items-center space-x-2">
-								<span class="text-sm font-mono {getRateColor(rate.rateNumeric)}">
+								<span class="text-sm font-mono {getRateColor(rate.rateNumeric, showAnnualRates)}">
 									{rate.rateFormatted}
 								</span>
-								<div class="w-12 h-6 rounded {getRateBg(rate.rateNumeric)} flex items-center justify-center">
+								<div class="w-12 h-6 rounded {getRateBg(rate.rateNumeric, showAnnualRates)} flex items-center justify-center">
 									<div 
 										class="w-1 h-4 rounded-full"
 										class:bg-green-400={rate.rateNumeric > 0}

@@ -1,8 +1,20 @@
 import { Effect, pipe, Schema } from "effect";
-import { withFallback } from "../http";
 import { FundingRate, NadoSymbol, NadoPerpProduct } from "../types";
 import { cachedExchangeCall } from "../cache";
 
+// Response schemas for funding rate endpoints
+const SingleFundingRateResponse = Schema.Struct({
+    product_id: Schema.Number,
+    funding_rate_x18: Schema.String,
+    update_time: Schema.String,
+});
+
+const MultipleFundingRatesResponse = Schema.Record({
+    key: Schema.String, // product_id as string
+    value: SingleFundingRateResponse,
+});
+
+// Legacy schemas for product discovery
 const AllProductsResponse = Schema.Struct({
     status: Schema.String,
     data: Schema.Struct({
@@ -20,6 +32,7 @@ const SymbolsResponse = Schema.Struct({
 });
 
 const NADO_API = "https://gateway.prod.nado.xyz/v1/query";
+const NADO_ARCHIVE_API = "https://archive.prod.nado.xyz/v1";
 
 const getSymbols = (): Effect.Effect<Record<string, NadoSymbol>, Error> =>
     pipe(
@@ -76,10 +89,69 @@ const getPerpProducts = (): Effect.Effect<NadoPerpProduct[], Error> =>
         Effect.catchAll(() => Effect.succeed([] as NadoPerpProduct[]))
     );
 
+// Convert funding rate from X18 format (10^18 multiplier) to decimal
+const convertFromX18 = (rateX18: string): number => {
+    try {
+        const rateBigInt = BigInt(rateX18);
+        return Number(rateBigInt) / 1e18; // Convert from 10^18 fixed point to decimal
+    } catch (error) {
+        console.warn('Failed to convert X18 rate:', rateX18, error);
+        return 0;
+    }
+};
+
+// Fetch funding rates for multiple products in a single request
+const fetchFundingRatesForProducts = (productIds: number[]): Effect.Effect<Record<number, number>, Error> =>
+    pipe(
+        Effect.tryPromise({
+            try: () =>
+                fetch(NADO_ARCHIVE_API, {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Accept-Encoding": "gzip",
+                    },
+                    body: JSON.stringify({
+                        funding_rates: {
+                            product_ids: productIds
+                        }
+                    }),
+                })
+                    .then((res) => {
+                        if (!res.ok) {
+                            throw new Error(`Nado Archive API error: ${res.status} ${res.statusText}`);
+                        }
+                        return res.json();
+                    }),
+            catch: (error) => new Error(`Nado funding rates fetch failed: ${error instanceof Error ? error.message : String(error)}`)
+        }),
+        Effect.flatMap((data) => Schema.decodeUnknown(MultipleFundingRatesResponse)(data)),
+        Effect.map((response) => {
+            const ratesMap: Record<number, number> = {};
+            Object.entries(response).forEach(([productIdStr, rateData]) => {
+                const productId = parseInt(productIdStr, 10);
+                ratesMap[productId] = convertFromX18(rateData.funding_rate_x18);
+            });
+            return ratesMap;
+        }),
+        Effect.catchAll((error) => {
+            console.warn('Nado Archive API error for funding rates:', error);
+            return Effect.succeed({} as Record<number, number>);
+        })
+    );
+
+// Main function to get all funding rates using the proper API
 const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
     pipe(
         Effect.all([getSymbols(), getPerpProducts()], { concurrency: 2 }),
-        Effect.map(([symbols, products]) => {
+        Effect.flatMap(([symbols, products]) => {
+            if (products.length === 0) {
+                return Effect.succeed([]);
+            }
+
+            // Extract product IDs for batch request
+            const productIds = products.map(p => p.product_id);
+            
             // Create a map of product_id to symbol name
             const productIdToSymbol = new Map<number, string>();
             Object.entries(symbols)
@@ -88,21 +160,27 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
                     productIdToSymbol.set(symbolData.product_id, symbolName);
                 });
 
-            // Map products to funding rates using symbol names
-            return products.map((product) => {
-                const symbolName = productIdToSymbol.get(product.product_id) || `PRODUCT-${product.product_id}`;
-                const cumulativeFunding = BigInt(product.state.cumulative_funding_long_x18);
-                
-                return {
-                    symbol: symbolName,
-                    baseAsset: (symbolName.split("-")[0] || symbolName).replace(/^k/, ''),
-                    estimatedFundingRate: "0", // Nado provides cumulative funding, not rate
-                    lastSettlementRate: cumulativeFunding > 0n ? (cumulativeFunding / 1000000000000000000n).toString() : "0",
-                    lastSettlementTime: Date.now() - 3600000,
-                    nextFundingTime: Date.now() + 3600000,
-                    fundingInterval: 3600000,
-                };
-            });
+            // Fetch funding rates for all products
+            return fetchFundingRatesForProducts(productIds).pipe(
+                Effect.map((ratesMap) => {
+                    // Map products to funding rates using the fetched rates
+                    const currentTime = Date.now();
+                    return products.map((product) => {
+                        const symbolName = productIdToSymbol.get(product.product_id) || `PRODUCT-${product.product_id}`;
+                        const fundingRate = ratesMap[product.product_id] || 0;
+                        
+                        return {
+                            symbol: symbolName,
+                            baseAsset: (symbolName.split("-")[0] || symbolName).replace(/^k/, ''),
+                            estimatedFundingRate: fundingRate.toString(),
+                            lastSettlementRate: fundingRate.toString(), // Use same rate for settlement
+                            lastSettlementTime: currentTime - 3600000, // 1 hour ago
+                            nextFundingTime: currentTime + 3600000, // 1 hour from now
+                            fundingInterval: 3600000, // 1 hour funding interval
+                        };
+                    });
+                })
+            );
         }),
         Effect.catchAll((error) => {
             console.warn('Nado API error, returning empty array:', error);
@@ -116,4 +194,37 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
         "fundingRates",
         "all",
         getAllFundingRatesUncached()
+    );
+
+// Optional: Export single funding rate function for future use
+export const getSingleFundingRate = (productId: number): Effect.Effect<number | null, Error> =>
+    pipe(
+        Effect.tryPromise({
+            try: () =>
+                fetch(NADO_ARCHIVE_API, {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Accept-Encoding": "gzip",
+                    },
+                    body: JSON.stringify({
+                        funding_rate: {
+                            product_id: productId
+                        }
+                    }),
+                })
+                    .then((res) => {
+                        if (!res.ok) {
+                            throw new Error(`Nado Archive API error: ${res.status} ${res.statusText}`);
+                        }
+                        return res.json();
+                    }),
+            catch: (error) => new Error(`Nado single funding rate fetch failed: ${error instanceof Error ? error.message : String(error)}`)
+        }),
+        Effect.flatMap((data) => Schema.decodeUnknown(SingleFundingRateResponse)(data)),
+        Effect.map((response) => convertFromX18(response.funding_rate_x18)),
+        Effect.catchAll((error) => {
+            console.warn(`Nado Archive API error for product ${productId}:`, error);
+            return Effect.succeed(null);
+        })
     );
