@@ -5,54 +5,76 @@ import { cachedExchangeCall } from "../cache";
 
 const PARADEX_API = "https://api.prod.paradex.trade/v1";
 
-const getMarketsSummary = (): Effect.Effect<any[], Error> =>
-    pipe(
-        safeFetch(`${PARADEX_API}/markets/summary?market=ALL`),
-        Effect.map((response: any) => [...response.results]),
-        Effect.catchAll((error) => {
-            console.warn('Paradex markets API error:', error);
-            return Effect.succeed([]);
-        })
-    );
+interface ParadexMarket {
+	symbol: string;
+	base_currency: string;
+	funding_period_hours: number;
+}
 
-const getFundingData = (market: string): Effect.Effect<{ created_at: number; funding_rate: string; funding_period_hours?: number } | null, Error> =>
-    pipe(
-        safeFetch(`${PARADEX_API}/funding/data?market=${market}&page_size=1`),
-        Effect.map((data: any) => {
-            console.log(`Paradex: fetched funding data for ${market}`);
-            return data.results?.[0] || null;
-        }),
-        Effect.catchAll(() => {
-            console.log(`Paradex: funding data fetch failed for ${market}, using null`);
-            return Effect.succeed(null);
-        })
-    );
+interface ParadexMarketSummary {
+	symbol: string;
+	funding_rate: string;
+	created_at: number;
+}
+
+const getMarkets = (): Effect.Effect<ParadexMarket[], Error> =>
+	pipe(
+		safeFetch(`${PARADEX_API}/markets`),
+		Effect.map((response: any) => response.results || []),
+		Effect.catchAll((error) => {
+			console.warn('Paradex markets API error:', error);
+			return Effect.succeed([]);
+		})
+	);
+
+const getMarketsSummary = (): Effect.Effect<ParadexMarketSummary[], Error> =>
+	pipe(
+		safeFetch(`${PARADEX_API}/markets/summary?market=ALL`),
+		Effect.map((response: any) => response.results || []),
+		Effect.catchAll((error) => {
+			console.warn('Paradex markets summary API error:', error);
+			return Effect.succeed([]);
+		})
+	);
 
 const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
-    pipe(
-        getMarketsSummary(),
-        Effect.map((markets) => {
-            // Use summary data only for speed - skip individual funding calls
-            return markets.map((market) => ({
-                symbol: market.symbol,
-                baseAsset: (market.symbol.split("-")[0] || market.symbol).replace(/^k/, ''),
-                estimatedFundingRate: market.funding_rate || "0",
-                lastSettlementRate: market.funding_rate || "0",
-                lastSettlementTime: Date.now() - 3600000,
-                nextFundingTime: Date.now() + 3600000,
-                fundingInterval: 3600000,
-            }));
-        }),
-        Effect.catchAll((error) => {
-            console.warn('Paradex API error, returning empty array:', error);
-            return Effect.succeed([]);
-        })
-    );
+	pipe(
+		Effect.all([getMarkets(), getMarketsSummary()], { concurrency: 2 }),
+		Effect.map(([markets, summaries]) => {
+			// Create a map of symbol -> funding_period_hours
+			const periodMap = new Map<string, number>();
+			markets.forEach((market) => {
+				periodMap.set(market.symbol, market.funding_period_hours || 8); // Default to 8h if not specified
+			});
+
+			// Merge summary data with period data and normalize to hourly
+			return summaries.map((summary) => {
+				const periodHours = periodMap.get(summary.symbol) || 8;
+				const rawRate = parseFloat(summary.funding_rate) || 0;
+				// Normalize to hourly rate: divide by period hours, multiply by 100 for percentage
+				const hourlyRate = (rawRate / periodHours) * 100;
+
+				return {
+					symbol: summary.symbol,
+					baseAsset: (summary.symbol.split("-")[0] || summary.symbol).replace(/^k/, ''),
+					estimatedFundingRate: hourlyRate.toString(),
+					lastSettlementRate: hourlyRate.toString(),
+					lastSettlementTime: summary.created_at,
+					nextFundingTime: summary.created_at + periodHours * 3600000,
+					fundingInterval: periodHours * 3600000,
+				};
+			});
+		}),
+		Effect.catchAll((error) => {
+			console.warn('Paradex API error, returning empty array:', error);
+			return Effect.succeed([]);
+		})
+	);
 
 export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
-    cachedExchangeCall(
-        "paradex",
-        "fundingRates",
-        "all",
-        getAllFundingRatesUncached()
-    );
+	cachedExchangeCall(
+		"paradex",
+		"fundingRates",
+		"all",
+		getAllFundingRatesUncached()
+	);

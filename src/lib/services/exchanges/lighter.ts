@@ -21,8 +21,8 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
             return lighterRates.map((rate: any) => ({
                 symbol: rate.symbol,
                 baseAsset: rate.symbol.split("-")[0] || rate.symbol,
-                estimatedFundingRate: rate.rate.toString(),
-                lastSettlementRate: rate.rate.toString(),
+                estimatedFundingRate: (rate.rate * 100).toString(),
+                lastSettlementRate: (rate.rate * 100).toString(),
                 lastSettlementTime: Date.now() - 3600000,
                 nextFundingTime: Date.now() + 3600000,
                 fundingInterval: 3600000,

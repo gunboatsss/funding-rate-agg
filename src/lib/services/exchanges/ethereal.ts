@@ -24,8 +24,8 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
             products.map((product) => ({
                 symbol: product.displayTicker,
                 baseAsset: product.baseTokenName,
-                estimatedFundingRate: product.fundingRate1h,
-                lastSettlementRate: product.fundingRate1h,
+                estimatedFundingRate: (parseFloat(product.fundingRate1h) * 100).toString(),
+                lastSettlementRate: (parseFloat(product.fundingRate1h) * 100).toString(),
                 lastSettlementTime: product.fundingUpdatedAt,
                 nextFundingTime: product.fundingUpdatedAt + 3600000,
                 fundingInterval: 3600000,

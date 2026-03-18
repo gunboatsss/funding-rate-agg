@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { DashboardData, SymbolGroup, ExchangeData, RateDisplay } from '$lib/types/frontend';
 	import type { FundingRate } from '$lib/services/types';
-	import { calculateAnnualRate, formatRateFromString, getRateColor, formatComparisonRate } from '$lib/utils/rate-calculations';
+	import { formatRateFromString, getRateColor, formatComparisonRate, type RatePeriod } from '$lib/utils/rate-calculations';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
@@ -14,7 +14,7 @@
 
 	let sortBy = $state<'symbol' | 'spread' | 'avgRate'>('symbol');
 	let sortOrder = $state<'asc' | 'desc'>('asc');
-	let showAnnualRates = $state<boolean>(false);
+	let selectedPeriod = $state<RatePeriod>('1h');
 
 	// Aggregate bySymbol data from ExchangeData - moved from parent component
 	let symbolGroups: SymbolGroup[] = $derived.by(() => {
@@ -113,12 +113,11 @@ const toggleSymbol = (symbol: string) => {
 				if (ex.rates && ex.rates.length > 0) {
 					ex.rates.forEach((rate: FundingRate) => {
 						const rateNumeric = parseFloat(rate.estimatedFundingRate) || 0;
-						const adjustedRateNumeric = showAnnualRates ? calculateAnnualRate(rateNumeric) : rateNumeric;
 						validExchanges.push({
 							...rate,
 							exchange: ex.exchange,
-							rateNumeric: adjustedRateNumeric,
-							rateFormatted: formatRateFromString(rate.estimatedFundingRate, showAnnualRates),
+							rateNumeric,
+							rateFormatted: formatRateFromString(rate.estimatedFundingRate, selectedPeriod),
 							isPositive: rateNumeric > 0,
 							timeUntilNextFunding: rate.nextFundingTime - Date.now(),
 							lastUpdateFormatted: new Date(ex.lastUpdate || Date.now()).toLocaleTimeString()
@@ -177,23 +176,17 @@ const toggleSymbol = (symbol: string) => {
 			<div class="flex items-center space-x-4">
 				<h3 class="text-sm font-medium text-gray-400">Symbol Groups ({symbolGroups.length})</h3>
 				<div class="flex items-center space-x-2">
-					<label for="annual-rates-toggle-symbols" class="text-sm text-gray-400">Show Annual Rates</label>
-					<button
-						id="annual-rates-toggle-symbols"
-						class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-						class:bg-cyan-600={showAnnualRates}
-						class:bg-gray-600={!showAnnualRates}
-						onclick={() => showAnnualRates = !showAnnualRates}
-						title="Toggle between daily and annual rates (rate × 365)"
-						role="switch"
-						aria-checked={showAnnualRates}
+					<label for="period-select-symbols" class="text-sm text-gray-400">Period:</label>
+					<select
+						id="period-select-symbols"
+						bind:value={selectedPeriod}
+						class="bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
 					>
-						<span
-							class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
-							class:translate-x-6={showAnnualRates}
-							class:translate-x-1={!showAnnualRates}
-						></span>
-					</button>
+						<option value="1h">1H</option>
+						<option value="8h">8H</option>
+						<option value="1d">1D</option>
+						<option value="365d">365D</option>
+					</select>
 				</div>
 			</div>
 			<div class="flex space-x-2">
@@ -270,8 +263,8 @@ const toggleSymbol = (symbol: string) => {
 							</div>
 							<div class="flex items-center space-x-1">
 								<span class="text-gray-400">Avg:</span>
-								<span class="font-mono {getRateColor(symbolGroup.comparison.average, showAnnualRates)}">
-									{formatComparisonRate(symbolGroup.comparison.average, showAnnualRates)}
+							<span class="font-mono {getRateColor(symbolGroup.comparison.average, selectedPeriod)}">
+								{formatComparisonRate(symbolGroup.comparison.average, selectedPeriod)}
 								</span>
 							</div>
 							<div class="flex items-center space-x-1">
@@ -288,14 +281,14 @@ const toggleSymbol = (symbol: string) => {
 							<span class="text-gray-500">Low:</span>
 							<span class="text-green-400">{symbolGroup.comparison.lowest.exchange}</span>
 							<span class="font-mono text-green-400">
-								{formatComparisonRate(symbolGroup.comparison.lowest.rate, showAnnualRates)}
+								{formatComparisonRate(symbolGroup.comparison.lowest.rate, selectedPeriod)}
 							</span>
 						</div>
 						<div class="flex items-center space-x-1">
 							<span class="text-gray-500">High:</span>
 							<span class="text-red-400">{symbolGroup.comparison.highest.exchange}</span>
 							<span class="font-mono text-red-400">
-								{formatComparisonRate(symbolGroup.comparison.highest.rate, showAnnualRates)}
+								{formatComparisonRate(symbolGroup.comparison.highest.rate, selectedPeriod)}
 							</span>
 						</div>
 					</div>
@@ -311,7 +304,6 @@ const toggleSymbol = (symbol: string) => {
 								<tr>
 									<th class="px-4 py-2 text-left text-xs font-medium text-gray-400">Exchange</th>
 									<th class="px-4 py-2 text-left text-xs font-medium text-gray-400">Rate</th>
-									<th class="px-4 py-2 text-left text-xs font-medium text-gray-400">Last Settlement</th>
 									<th class="px-4 py-2 text-left text-xs font-medium text-gray-400">Next Funding</th>
 									<th class="px-4 py-2 text-left text-xs font-medium text-gray-400">Updated</th>
 								</tr>
@@ -326,12 +318,9 @@ const toggleSymbol = (symbol: string) => {
 											</div>
 										</td>
 										<td class="px-4 py-2">
-<span class="text-sm font-mono {getRateColor(exchange.rateNumeric, showAnnualRates)}">
+<span class="text-sm font-mono {getRateColor(exchange.rateNumeric, selectedPeriod)}">
 											{exchange.rateFormatted}
 										</span>
-										</td>
-										<td class="px-4 py-2">
-											<span class="text-sm text-gray-300">{exchange.lastSettlementRate}</span>
 										</td>
 										<td class="px-4 py-2">
 											<span class="text-sm text-gray-300">

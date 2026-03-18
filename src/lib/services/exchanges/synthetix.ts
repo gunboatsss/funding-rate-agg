@@ -28,8 +28,8 @@ const getFundingRate = (market: SynthetixMarket): Effect.Effect<FundingRate, Err
         Effect.map((response: any) => ({
             symbol: market.symbol,
             baseAsset: market.baseAsset.replace(/^1000/, ''),
-            estimatedFundingRate: response.estimatedFundingRate,
-            lastSettlementRate: response.lastSettlementRate,
+            estimatedFundingRate: (parseFloat(response.estimatedFundingRate) * 100).toString(),
+            lastSettlementRate: (parseFloat(response.lastSettlementRate) * 100).toString(),
             lastSettlementTime: response.lastSettlementTime,
             nextFundingTime: response.nextFundingTime,
             fundingInterval: response.fundingInterval,

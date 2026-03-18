@@ -167,16 +167,18 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
                     const currentTime = Date.now();
                     return products.map((product) => {
                         const symbolName = productIdToSymbol.get(product.product_id) || `PRODUCT-${product.product_id}`;
-                        const fundingRate = ratesMap[product.product_id] || 0;
+                        const rawRate = ratesMap[product.product_id] || 0;
+                        // Nado returns hourly rate in X18, convert to percentage
+                        const hourlyRate = rawRate * 100;
                         
                         return {
                             symbol: symbolName,
                             baseAsset: (symbolName.split("-")[0] || symbolName).replace(/^k/, ''),
-                            estimatedFundingRate: fundingRate.toString(),
-                            lastSettlementRate: fundingRate.toString(), // Use same rate for settlement
-                            lastSettlementTime: currentTime - 3600000, // 1 hour ago
-                            nextFundingTime: currentTime + 3600000, // 1 hour from now
-                            fundingInterval: 3600000, // 1 hour funding interval
+                            estimatedFundingRate: hourlyRate.toString(),
+                            lastSettlementRate: hourlyRate.toString(),
+                            lastSettlementTime: currentTime - 3600000,
+                            nextFundingTime: currentTime + 3600000,
+                            fundingInterval: 3600000,
                         };
                     });
                 })
