@@ -89,19 +89,20 @@ const getPerpProducts = (): Effect.Effect<NadoPerpProduct[], Error> =>
         Effect.catchAll(() => Effect.succeed([] as NadoPerpProduct[]))
     );
 
-// Convert funding rate from X18 format (10^18 multiplier) to decimal
-const convertFromX18 = (rateX18: string): number => {
+const convertFromX18ToHourlyPercentage = (rateX18: string): number => {
     try {
         const rateBigInt = BigInt(rateX18);
-        return Number(rateBigInt) / 1e18; // Convert from 10^18 fixed point to decimal
+        const percentageX18 = (rateBigInt * 10000n) / 1_000_000_000_000_000_000n;
+        const hourlyPercentage = Number(percentageX18) / 24 / 100;
+        return hourlyPercentage;
     } catch (error) {
-        console.warn('Failed to convert X18 rate:', rateX18, error);
+        console.warn('Failed to convert X18 rate to hourly percentage:', rateX18, error);
         return 0;
     }
 };
 
 // Fetch funding rates for multiple products in a single request
-const fetchFundingRatesForProducts = (productIds: number[]): Effect.Effect<Record<number, number>, Error> =>
+const fetchFundingRatesForProducts = (productIds: number[]): Effect.Effect<Record<number, string>, Error> =>
     pipe(
         Effect.tryPromise({
             try: () =>
@@ -127,16 +128,16 @@ const fetchFundingRatesForProducts = (productIds: number[]): Effect.Effect<Recor
         }),
         Effect.flatMap((data) => Schema.decodeUnknown(MultipleFundingRatesResponse)(data)),
         Effect.map((response) => {
-            const ratesMap: Record<number, number> = {};
+            const ratesMap: Record<number, string> = {};
             Object.entries(response).forEach(([productIdStr, rateData]) => {
                 const productId = parseInt(productIdStr, 10);
-                ratesMap[productId] = convertFromX18(rateData.funding_rate_x18);
+                ratesMap[productId] = rateData.funding_rate_x18;
             });
             return ratesMap;
         }),
         Effect.catchAll((error) => {
             console.warn('Nado Archive API error for funding rates:', error);
-            return Effect.succeed({} as Record<number, number>);
+            return Effect.succeed({} as Record<number, string>);
         })
     );
 
@@ -167,9 +168,8 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
                     const currentTime = Date.now();
                     return products.map((product) => {
                         const symbolName = productIdToSymbol.get(product.product_id) || `PRODUCT-${product.product_id}`;
-                        const rawRate = ratesMap[product.product_id] || 0;
-                        // Nado returns hourly rate in X18, convert to percentage
-                        const hourlyRate = rawRate * 100;
+                        const rawRateX18 = ratesMap[product.product_id] || "0";
+                        const hourlyRate = convertFromX18ToHourlyPercentage(rawRateX18);
                         
                         return {
                             symbol: symbolName,
@@ -224,7 +224,7 @@ export const getSingleFundingRate = (productId: number): Effect.Effect<number | 
             catch: (error) => new Error(`Nado single funding rate fetch failed: ${error instanceof Error ? error.message : String(error)}`)
         }),
         Effect.flatMap((data) => Schema.decodeUnknown(SingleFundingRateResponse)(data)),
-        Effect.map((response) => convertFromX18(response.funding_rate_x18)),
+        Effect.map((response) => convertFromX18ToHourlyPercentage(response.funding_rate_x18)),
         Effect.catchAll((error) => {
             console.warn(`Nado Archive API error for product ${productId}:`, error);
             return Effect.succeed(null);
