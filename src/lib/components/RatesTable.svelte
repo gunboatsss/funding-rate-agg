@@ -266,9 +266,11 @@
 						</td>
 						<td class="px-4 py-3">
 							<span class="text-sm text-gray-300">
-								{rate.timeUntilNextFunding > 0 
-									? `${Math.floor(rate.timeUntilNextFunding / (1000 * 60))}m`
-									: 'Soon'
+								{rate.exchange === "Paradex" 
+									? "N/A" 
+									: rate.timeUntilNextFunding > 0 
+										? `${Math.floor(rate.timeUntilNextFunding / (1000 * 60))}m`
+										: "Soon"
 								}
 							</span>
 						</td>

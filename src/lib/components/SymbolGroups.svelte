@@ -324,9 +324,11 @@ const toggleSymbol = (symbol: string) => {
 										</td>
 										<td class="px-4 py-2">
 											<span class="text-sm text-gray-300">
-												{exchange.timeUntilNextFunding > 0 
-													? formatTime(exchange.timeUntilNextFunding)
-													: 'Soon'
+												{exchange.exchange === "Paradex" 
+													? "N/A" 
+													: exchange.timeUntilNextFunding > 0 
+														? formatTime(exchange.timeUntilNextFunding)
+														: "Soon"
 												}
 											</span>
 										</td>
