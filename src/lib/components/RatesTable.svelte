@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DashboardData } from '$lib/types/frontend';
 	import { normalizeFromHourly, formatRate, getRateColor, getRateBg, getPeriodLabel, type RatePeriod } from '$lib/utils/rate-calculations';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
 		data: DashboardData;
@@ -10,9 +11,30 @@
 
 	let sortKey = $state<'exchange' | 'symbol' | 'rate' | 'lastUpdate'>('symbol');
 	let sortDirection = $state<'asc' | 'desc'>('asc');
-	let filterExchange = $state<string>('all');
+	let filterExchange = new SvelteSet<string>();
 	let filterBaseAsset = $state<string>('all');
 	let selectedPeriod = $state<RatePeriod>('1h');
+
+	// Get unique exchanges from data
+	let availableExchanges = $derived.by(() => {
+		if (!data?.byExchange) return [];
+		return data.byExchange
+			.filter(ex => ex.status === 'success' && ex.rates.length > 0)
+			.map(ex => ex.exchange)
+			.sort();
+	});
+
+	const toggleExchange = (exchange: string) => {
+		if (filterExchange.has(exchange)) {
+			filterExchange.delete(exchange);
+		} else {
+			filterExchange.add(exchange);
+		}
+	};
+
+	const clearExchangeFilter = () => {
+		filterExchange.clear();
+	};
 
 	// Get all unique base assets - using $derived for proper reactivity
 	let uniqueBaseAssets = $derived(() => {
@@ -81,8 +103,8 @@
 		let filtered = allRates();
 
 		// Apply filters
-		if (filterExchange !== 'all') {
-			filtered = filtered.filter(rate => rate.exchange === filterExchange);
+		if (filterExchange.size > 0) {
+			filtered = filtered.filter(rate => filterExchange.has(rate.exchange));
 		}
 		if (filterBaseAsset !== 'all') {
 			filtered = filtered.filter(rate => rate.baseAsset === filterBaseAsset);
@@ -131,18 +153,46 @@
 	<!-- Filters -->
 	<div class="p-4 border-b border-gray-800 bg-gray-800/30">
 		<div class="flex flex-wrap gap-4 items-center">
+			<!-- Exchange Filter -->
 			<div class="flex items-center space-x-2">
 				<label for="exchange-filter" class="text-sm text-gray-400">Exchange:</label>
-				<select 
-					id="exchange-filter"
-					bind:value={filterExchange}
-					class="bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-				>
-					<option value="all">All Exchanges</option>
-					{#each data.byExchange as exchange (exchange.exchange)}
-						<option value={exchange.exchange}>{exchange.exchange}</option>
-					{/each}
-				</select>
+				<div class="relative inline-block">
+					<select
+						id="exchange-filter"
+						onchange={(e) => {
+							const value = (e.target as HTMLSelectElement).value;
+							if (value === 'clear') {
+								clearExchangeFilter();
+							} else if (value !== '') {
+								toggleExchange(value);
+								(e.target as HTMLSelectElement).value = '';
+							}
+						}}
+						class="bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+					>
+						<option value="">
+							{filterExchange.size === 0 ? 'All' : `${filterExchange.size} selected`}
+						</option>
+						{#if filterExchange.size > 0}
+							<option value="clear">Clear filter</option>
+						{/if}
+						{#each availableExchanges as exchange (exchange)}
+							<option value={exchange}>{exchange}</option>
+						{/each}
+					</select>
+				</div>
+				{#if filterExchange.size > 0}
+					<div class="flex flex-wrap gap-1">
+						{#each Array.from(filterExchange) as exchange (exchange)}
+							<button
+								class="px-2 py-0.5 text-xs bg-cyan-900 text-cyan-400 rounded hover:bg-cyan-800 transition-colors"
+								onclick={() => toggleExchange(exchange)}
+							>
+								{exchange} ×
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
 			
 			<div class="flex items-center space-x-2">

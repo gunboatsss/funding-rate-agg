@@ -11,10 +11,32 @@
 	let { data }: Props = $props();
 	
 	let expandedSymbols = new SvelteSet<string>();
+	let selectedExchanges = new SvelteSet<string>();
 
 	let sortBy = $state<'symbol' | 'spread' | 'avgRate'>('symbol');
 	let sortOrder = $state<'asc' | 'desc'>('asc');
 	let selectedPeriod = $state<RatePeriod>('1h');
+
+	// Get unique exchanges from data
+	let availableExchanges = $derived.by(() => {
+		if (!data?.byExchange) return [];
+		return data.byExchange
+			.filter(ex => ex.status === 'success' && ex.rates.length > 0)
+			.map(ex => ex.exchange)
+			.sort();
+	});
+
+	const toggleExchange = (exchange: string) => {
+		if (selectedExchanges.has(exchange)) {
+			selectedExchanges.delete(exchange);
+		} else {
+			selectedExchanges.add(exchange);
+		}
+	};
+
+	const clearExchangeFilter = () => {
+		selectedExchanges.clear();
+	};
 
 	// Aggregate bySymbol data from ExchangeData - moved from parent component
 	let symbolGroups: SymbolGroup[] = $derived.by(() => {
@@ -32,7 +54,16 @@ const toggleSymbol = (symbol: string) => {
 	};
 
 	const sortedData: SymbolGroup[] = $derived.by(() => {
-		const sorted = [...symbolGroups];
+		let filtered = [...symbolGroups];
+		
+		// Apply exchange filter
+		if (selectedExchanges.size > 0) {
+			filtered = filtered.filter(group => 
+				group.exchanges.some(ex => selectedExchanges.has(ex.exchange))
+			);
+		}
+		
+		const sorted = filtered;
 		
 		sorted.sort((a, b) => {
 			switch (sortBy) {
@@ -174,7 +205,55 @@ const toggleSymbol = (symbol: string) => {
 	<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center space-x-4">
-				<h3 class="text-sm font-medium text-gray-400">Symbol Groups ({symbolGroups.length})</h3>
+				<h3 class="text-sm font-medium text-gray-400">
+					Symbol Groups ({sortedData.length}
+					{#if selectedExchanges.size > 0}
+						<span class="text-cyan-400">/ {symbolGroups.length}</span>
+					{/if})
+				</h3>
+				
+				<!-- Exchange Filter -->
+				<div class="flex items-center space-x-2">
+					<label for="exchange-filter-symbols" class="text-sm text-gray-400">Exchange:</label>
+					<div class="relative inline-block">
+						<select
+							id="exchange-filter-symbols"
+							onchange={(e) => {
+								const value = (e.target as HTMLSelectElement).value;
+								if (value === 'clear') {
+									clearExchangeFilter();
+								} else if (value !== '') {
+									toggleExchange(value);
+									(e.target as HTMLSelectElement).value = '';
+								}
+							}}
+							class="bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+						>
+							<option value="">
+								{selectedExchanges.size === 0 ? 'All' : `${selectedExchanges.size} selected`}
+							</option>
+							{#if selectedExchanges.size > 0}
+								<option value="clear">Clear filter</option>
+							{/if}
+							{#each availableExchanges as exchange (exchange)}
+								<option value={exchange}>{exchange}</option>
+							{/each}
+						</select>
+					</div>
+					{#if selectedExchanges.size > 0}
+						<div class="flex flex-wrap gap-1">
+							{#each Array.from(selectedExchanges) as exchange (exchange)}
+								<button
+									class="px-2 py-0.5 text-xs bg-cyan-900 text-cyan-400 rounded hover:bg-cyan-800 transition-colors"
+									onclick={() => toggleExchange(exchange)}
+								>
+									{exchange} ×
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
 				<div class="flex items-center space-x-2">
 					<label for="period-select-symbols" class="text-sm text-gray-400">Period:</label>
 					<select
