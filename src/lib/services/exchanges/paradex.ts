@@ -2,6 +2,7 @@ import { Effect, pipe } from "effect";
 import { safeFetch } from "../http";
 import { FundingRate } from "../types";
 import { cachedExchangeCall } from "../cache";
+import { normalizeBaseAsset } from "$lib/utils/token-normalization";
 
 const PARADEX_API = "https://api.prod.paradex.trade/v1";
 
@@ -64,7 +65,7 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
 
 				return {
 					symbol: summary.symbol,
-					baseAsset: (summary.symbol.split("-")[0] || summary.symbol).replace(/^k/, ''),
+					baseAsset: normalizeBaseAsset(summary.symbol),
 					estimatedFundingRate: hourlyRate.toString(),
 					lastSettlementRate: hourlyRate.toString(),
 					lastSettlementTime: summary.created_at,
@@ -84,5 +85,6 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
 		"paradex",
 		"fundingRates",
 		"all",
-		getAllFundingRatesUncached()
+		getAllFundingRatesUncached(),
+		[]
 	);

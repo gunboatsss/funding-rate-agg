@@ -1,6 +1,7 @@
 import { Effect, pipe, Schema } from "effect";
 import { FundingRate, NadoSymbol, NadoPerpProduct } from "../types";
 import { cachedExchangeCall } from "../cache";
+import { normalizeBaseAsset } from "$lib/utils/token-normalization";
 
 // Response schemas for funding rate endpoints
 const SingleFundingRateResponse = Schema.Struct({
@@ -173,7 +174,7 @@ const getAllFundingRatesUncached = (): Effect.Effect<FundingRate[], Error> =>
                         
                         return {
                             symbol: symbolName,
-                            baseAsset: (symbolName.split("-")[0] || symbolName).replace(/^k/, ''),
+                            baseAsset: normalizeBaseAsset(symbolName),
                             estimatedFundingRate: hourlyRate.toString(),
                             lastSettlementRate: hourlyRate.toString(),
                             lastSettlementTime: currentTime - 3600000,
@@ -195,7 +196,8 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
         "nado",
         "fundingRates",
         "all",
-        getAllFundingRatesUncached()
+        getAllFundingRatesUncached(),
+        []
     );
 
 // Optional: Export single funding rate function for future use

@@ -1,6 +1,7 @@
 import { Effect, pipe } from "effect";
 import { safeFetch } from "../http";
 import { FundingRate, SynthetixMarket } from "../types";
+import { normalizeBaseAsset } from "$lib/utils/token-normalization";
 
 const SYNTHETIX_API = "https://papi.synthetix.io/v1/info";
 
@@ -49,7 +50,7 @@ const getFundingRate = (market: SynthetixMarket): Effect.Effect<FundingRate, Err
         Effect.catchAll(() =>
             Effect.succeed({
                 symbol: market.symbol,
-                baseAsset: market.baseAsset.replace(/^1000/, ""),
+            baseAsset: normalizeBaseAsset(market.baseAsset),
                 estimatedFundingRate: "0",
                 lastSettlementRate: "0",
                 lastSettlementTime: Date.now() - 3600000,

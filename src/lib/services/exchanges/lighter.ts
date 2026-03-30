@@ -1,6 +1,7 @@
 import { Effect, pipe } from "effect";
 import { safeFetch } from "../http";
 import { FundingRate } from "../types";
+import { normalizeBaseAsset } from "$lib/utils/token-normalization";
 
 const LIGHTER_API = "https://mainnet.zklighter.elliot.ai";
 
@@ -29,7 +30,7 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
 
             return lighterRates.map((rate) => ({
                 symbol: rate.symbol,
-                baseAsset: (rate.symbol.split("-")[0] || rate.symbol).replace(/^1000/, ""),
+                baseAsset: normalizeBaseAsset(rate.symbol),
                 estimatedFundingRate: (rate.rate * 100).toString(),
                 lastSettlementRate: (rate.rate * 100).toString(),
                 lastSettlementTime: Date.now() - 3600000,
