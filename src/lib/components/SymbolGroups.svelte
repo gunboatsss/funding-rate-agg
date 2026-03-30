@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { DashboardData, SymbolGroup, ExchangeData, RateDisplay } from '$lib/types/frontend';
 	import type { FundingRate } from '$lib/services/types';
-	import { formatRateFromString, getRateColor, formatComparisonRate, type RatePeriod } from '$lib/utils/rate-calculations';
+	import { formatRateFromString, getRateColor, formatComparisonRate, normalizeFromHourly, type RatePeriod } from '$lib/utils/rate-calculations';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
@@ -13,7 +13,7 @@
 	let expandedSymbols = new SvelteSet<string>();
 	let selectedExchanges = new SvelteSet<string>();
 
-	let sortBy = $state<'symbol' | 'spread' | 'avgRate'>('symbol');
+	let sortBy = $state<'symbol' | 'spread' | 'medianRate'>('symbol');
 	let sortOrder = $state<'asc' | 'desc'>('asc');
 	let selectedPeriod = $state<RatePeriod>('1h');
 
@@ -72,14 +72,14 @@ const toggleSymbol = (symbol: string) => {
 					return sortOrder === 'asc' ? symbolComparison : -symbolComparison;
 				}
 				case 'spread': {
-					const aSpread = a.comparison?.spread || 0;
-					const bSpread = b.comparison?.spread || 0;
+					const aSpread = normalizeFromHourly(a.comparison?.spread || 0, selectedPeriod);
+					const bSpread = normalizeFromHourly(b.comparison?.spread || 0, selectedPeriod);
 					return sortOrder === 'asc' ? aSpread - bSpread : bSpread - aSpread;
 				}
-				case 'avgRate': {
-					const aAvg = a.comparison?.average || 0;
-					const bAvg = b.comparison?.average || 0;
-					return sortOrder === 'asc' ? aAvg - bAvg : bAvg - aAvg;
+				case 'medianRate': {
+					const aMedian = a.comparison?.median || 0;
+					const bMedian = b.comparison?.median || 0;
+					return sortOrder === 'asc' ? aMedian - bMedian : bMedian - aMedian;
 				}
 				default:
 					return 0;
@@ -184,10 +184,15 @@ const toggleSymbol = (symbol: string) => {
 
 			validRates.sort((a, b) => a.rate - b.rate);
 
+			const mid = Math.floor(validRates.length / 2);
+			const median = validRates.length % 2 !== 0
+				? validRates[mid].rate
+				: (validRates[mid - 1].rate + validRates[mid].rate) / 2;
+
 			return {
 				lowest: validRates[0],
 				highest: validRates[validRates.length - 1],
-				average: validRates.reduce((sum, item) => sum + item.rate, 0) / validRates.length,
+				median,
 				spread: validRates[validRates.length - 1].rate - validRates[0].rate,
 				count: validRates.length
 			};
@@ -295,13 +300,13 @@ const toggleSymbol = (symbol: string) => {
 				</button>
 				<button
 					class="px-3 py-1 text-xs rounded-md transition-colors"
-					class:bg-gray-700={sortBy === 'avgRate'}
-					class:text-cyan-400={sortBy === 'avgRate'}
-					class:text-gray-400={sortBy !== 'avgRate'}
-					onclick={() => handleSort('avgRate')}
+					class:bg-gray-700={sortBy === 'medianRate'}
+					class:text-cyan-400={sortBy === 'medianRate'}
+					class:text-gray-400={sortBy !== 'medianRate'}
+					onclick={() => handleSort('medianRate')}
 				>
-					Avg Rate
-					{#if sortBy === 'avgRate'}
+					Median Rate
+					{#if sortBy === 'medianRate'}
 						<span class="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>
 					{/if}
 				</button>
@@ -333,17 +338,18 @@ const toggleSymbol = (symbol: string) => {
 					</div>
 					
 					{#if symbolGroup.comparison}
+						{@const adjustedSpread = normalizeFromHourly(symbolGroup.comparison.spread, selectedPeriod)}
 						<div class="flex items-center space-x-4 text-sm">
 							<div class="flex items-center space-x-1">
 								<span class="text-gray-400">Spread:</span>
-								<span class="font-mono {getSpreadColor(symbolGroup.comparison.spread)}">
-									{symbolGroup.comparison.spread.toFixed(4)}%
+								<span class="font-mono {getSpreadColor(adjustedSpread)}">
+									{adjustedSpread.toFixed(4)}%
 								</span>
 							</div>
 							<div class="flex items-center space-x-1">
-								<span class="text-gray-400">Avg:</span>
-							<span class="font-mono {getRateColor(symbolGroup.comparison.average, selectedPeriod)}">
-								{formatComparisonRate(symbolGroup.comparison.average, selectedPeriod)}
+								<span class="text-gray-400">Median:</span>
+							<span class="font-mono {getRateColor(symbolGroup.comparison.median, selectedPeriod)}">
+								{formatComparisonRate(symbolGroup.comparison.median, selectedPeriod)}
 								</span>
 							</div>
 							<div class="flex items-center space-x-1">

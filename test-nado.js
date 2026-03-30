@@ -4,7 +4,7 @@
  */
 
 import { getAllFundingRates } from '../src/lib/services/exchanges/nado.ts';
-import { Effect, Console } from 'effect';
+import { Effect } from 'effect';
 
 // Test the Nado service
 const testNadoService = async () => {

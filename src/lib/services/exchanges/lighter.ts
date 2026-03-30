@@ -4,23 +4,32 @@ import { FundingRate } from "../types";
 
 const LIGHTER_API = "https://mainnet.zklighter.elliot.ai";
 
-const getFundingRates = (): Effect.Effect<any[], Error> =>
+interface LighterFundingRateResponse {
+  symbol: string;
+  rate: number;
+  exchange: string;
+}
+
+interface LighterApiResponse {
+  funding_rates: LighterFundingRateResponse[];
+}
+
+const getFundingRates = (): Effect.Effect<LighterApiResponse, Error> =>
     pipe(
         safeFetch(`${LIGHTER_API}/api/v1/funding-rates`),
-        Effect.map((response: any) => [...response.funding_rates]),
-        Effect.catchAll(() => Effect.succeed([]))
+        Effect.map((response) => response as LighterApiResponse),
+        Effect.catchAll(() => Effect.succeed({ funding_rates: [] } as LighterApiResponse))
     );
 
 export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
     pipe(
         getFundingRates(),
-        Effect.map((response: any) => {
-            // Filter to only include Lighter exchange rates from the aggregator API
-            const lighterRates = response.funding_rates?.filter((rate: any) => rate.exchange === "lighter") || [];
-                        
-            return lighterRates.map((rate: any) => ({
+        Effect.map((response) => {
+            const lighterRates = response.funding_rates?.filter((rate) => rate.exchange === "lighter") || [];
+
+            return lighterRates.map((rate) => ({
                 symbol: rate.symbol,
-                baseAsset: rate.symbol.split("-")[0] || rate.symbol,
+                baseAsset: (rate.symbol.split("-")[0] || rate.symbol).replace(/^1000/, ""),
                 estimatedFundingRate: (rate.rate * 100).toString(),
                 lastSettlementRate: (rate.rate * 100).toString(),
                 lastSettlementTime: Date.now() - 3600000,
@@ -29,7 +38,7 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
             }));
         }),
         Effect.catchAll((error) => {
-            console.warn('Lighter API error, returning empty array:', error);
+            console.warn("Lighter API error, returning empty array:", error);
             return Effect.succeed([]);
         })
     );

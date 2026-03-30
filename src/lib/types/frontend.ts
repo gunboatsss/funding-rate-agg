@@ -25,7 +25,7 @@ export interface SymbolGroup {
   comparison: {
     lowest: { exchange: string; rate: number };
     highest: { exchange: string; rate: number };
-    average: number;
+    median: number;
     spread: number;
     count: number;
   } | null;

@@ -17,12 +17,20 @@ interface ParadexMarketSummary {
 	created_at: number;
 }
 
+interface ParadexApiResponse {
+	results: ParadexMarket[];
+}
+
+interface ParadexSummaryApiResponse {
+	results: ParadexMarketSummary[];
+}
+
 const getMarkets = (): Effect.Effect<ParadexMarket[], Error> =>
 	pipe(
 		safeFetch(`${PARADEX_API}/markets`),
-		Effect.map((response: any) => response.results || []),
+		Effect.map((response) => (response as ParadexApiResponse).results || []),
 		Effect.catchAll((error) => {
-			console.warn('Paradex markets API error:', error);
+			console.warn("Paradex markets API error:", error);
 			return Effect.succeed([]);
 		})
 	);
@@ -30,9 +38,9 @@ const getMarkets = (): Effect.Effect<ParadexMarket[], Error> =>
 const getMarketsSummary = (): Effect.Effect<ParadexMarketSummary[], Error> =>
 	pipe(
 		safeFetch(`${PARADEX_API}/markets/summary?market=ALL`),
-		Effect.map((response: any) => response.results || []),
+		Effect.map((response) => (response as ParadexSummaryApiResponse).results || []),
 		Effect.catchAll((error) => {
-			console.warn('Paradex markets summary API error:', error);
+			console.warn("Paradex markets summary API error:", error);
 			return Effect.succeed([]);
 		})
 	);

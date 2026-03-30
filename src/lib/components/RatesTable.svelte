@@ -40,7 +40,7 @@
 	let uniqueBaseAssets = $derived(() => {
 		if (!data?.byExchange || data?.byExchange?.length === 0) return [];
 		
-		const assets = new Set<string>();
+		const assets = new SvelteSet<string>();
 		data.byExchange.forEach(exchange => {
 			if (exchange.status === 'success' && exchange.rates) {
 				exchange.rates.forEach(rate => {

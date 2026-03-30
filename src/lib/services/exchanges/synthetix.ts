@@ -1,8 +1,20 @@
-import { Effect, pipe, Schema } from "effect";
+import { Effect, pipe } from "effect";
 import { safeFetch } from "../http";
 import { FundingRate, SynthetixMarket } from "../types";
 
 const SYNTHETIX_API = "https://papi.synthetix.io/v1/info";
+
+interface SynthetixApiResponse {
+	response: unknown;
+}
+
+interface SynthetixFundingRateResponse {
+	estimatedFundingRate: string;
+	lastSettlementRate: string;
+	lastSettlementTime: number;
+	nextFundingTime: number;
+	fundingInterval: number;
+}
 
 const getMarkets = (): Effect.Effect<SynthetixMarket[], Error> =>
     pipe(
@@ -12,7 +24,7 @@ const getMarkets = (): Effect.Effect<SynthetixMarket[], Error> =>
                 params: { action: "getMarkets" },
             }),
         }),
-        Effect.map((data: any) => data.response),
+        Effect.map((data) => (data as SynthetixApiResponse).response as SynthetixMarket[]),
         Effect.catchAll(() => Effect.succeed([] as SynthetixMarket[]))
     );
 
@@ -24,25 +36,27 @@ const getFundingRate = (market: SynthetixMarket): Effect.Effect<FundingRate, Err
                 params: { action: "getFundingRate", symbol: market.symbol },
             }),
         }),
-        Effect.map((data: any) => data.response),
-        Effect.map((response: any) => ({
+        Effect.map((data) => (data as SynthetixApiResponse).response as SynthetixFundingRateResponse),
+        Effect.map((response) => ({
             symbol: market.symbol,
-            baseAsset: market.baseAsset.replace(/^1000/, ''),
+            baseAsset: market.baseAsset.replace(/^1000/, ""),
             estimatedFundingRate: (parseFloat(response.estimatedFundingRate) * 100).toString(),
             lastSettlementRate: (parseFloat(response.lastSettlementRate) * 100).toString(),
             lastSettlementTime: response.lastSettlementTime,
             nextFundingTime: response.nextFundingTime,
             fundingInterval: response.fundingInterval,
-        } as FundingRate)),
-        Effect.catchAll(() => Effect.succeed({
-            symbol: market.symbol,
-            baseAsset: market.baseAsset.replace(/^1000/, ''),
-            estimatedFundingRate: "0",
-            lastSettlementRate: "0",
-            lastSettlementTime: Date.now() - 3600000,
-            nextFundingTime: Date.now() + 3600000,
-            fundingInterval: 3600000,
-        } as FundingRate))
+        })),
+        Effect.catchAll(() =>
+            Effect.succeed({
+                symbol: market.symbol,
+                baseAsset: market.baseAsset.replace(/^1000/, ""),
+                estimatedFundingRate: "0",
+                lastSettlementRate: "0",
+                lastSettlementTime: Date.now() - 3600000,
+                nextFundingTime: Date.now() + 3600000,
+                fundingInterval: 3600000,
+            } as FundingRate)
+        )
     );
 
 export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
@@ -50,14 +64,12 @@ export const getAllFundingRates = (): Effect.Effect<FundingRate[], Error> =>
         getMarkets(),
         Effect.flatMap((markets) =>
             Effect.all(
-                markets.slice(0, 10).map((market) => // Limit to prevent overload
-                    getFundingRate(market)
-                ),
-                { concurrency: 3 } // Reduced concurrency to be more conservative
+                markets.slice(0, 10).map((market) => getFundingRate(market)),
+                { concurrency: 3 }
             )
         ),
         Effect.catchAll((error) => {
-            console.warn('Synthetix API error, returning empty array:', error);
+            console.warn("Synthetix API error, returning empty array:", error);
             return Effect.succeed([]);
         })
     );

@@ -35,7 +35,7 @@ export const withCacheEffect = <A, E>(
   options: CacheOptions = {}
 ): Effect.Effect<A, E> => {
   return Effect.suspend(() => {
-    return createCache((k: string) => effect, options).pipe(
+    return createCache((_k: string) => effect, options).pipe( // eslint-disable-line @typescript-eslint/no-unused-vars
       Effect.flatMap((cache) => cache.get(key))
     );
   });
@@ -44,7 +44,7 @@ export const withCacheEffect = <A, E>(
 // Convenience function for caching function results
 export const cachedFunction = <A, E>(
   fn: (key: string) => Effect.Effect<A, E>,
-  options?: CacheOptions
+  _options?: CacheOptions // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Effect.Effect<(key: string) => Effect.Effect<A, E>, never, never> => {
   return Effect.cachedFunction(fn);
 };
@@ -88,8 +88,8 @@ export const cachedExchangeCall = <A, E>(
 };
 
 // Type alias for better readability
-export type FundingRateCache = Cache.Cache<string, readonly any[], any>;
-export type ExchangeCache = Cache.Cache<string, any, any>;
+export type FundingRateCache = Cache.Cache<string, readonly Record<string, unknown>[], never>;
+export type ExchangeCache = Cache.Cache<string, unknown, never>;
 
 // Cache statistics helper
 export const getCacheStats = <K, A, E>(
